@@ -1,0 +1,20 @@
+[package]
+name = "streaming-harness"
+version = "0.1.0"
+authors = ["Andrea Lattuada <andrea.lattuada@inf.ethz.ch>"]
+
+[features]
+default = []
+hdrhist-support = ["hdrhist"]
+
+[dependencies]
+num-traits = "^0.2"
+hdrhist = { git = "https://github.com/utaal/hdrhist-rust.git", optional = true }
+
+[dev-dependencies]
+timely = { git = "https://github.com/frankmcsherry/timely-dataflow.git" }
+rand = "^0.3.18"
+
+[[example]]
+name = "timely-word-count"
+required-features = ["hdrhist-support"]
