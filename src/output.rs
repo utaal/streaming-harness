@@ -57,6 +57,10 @@ impl<
         latency_metrics
     }
 
+    pub fn recorded_samples(&self) -> usize {
+        self.recorded_samples
+    }
+
     #[inline(always)]
     pub fn acknowledge_next(&mut self, at: T) {
         let begin_t = self.input_times.next().expect("No additional input_times");
