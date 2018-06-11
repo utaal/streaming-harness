@@ -1,7 +1,7 @@
 extern crate timely;
 extern crate streaming_harness;
+extern crate streaming_harness_hdrhist as hdrhist;
 extern crate rand;
-extern crate hdrhist;
 
 use std::collections::HashMap;
 use std::cell::RefCell;
@@ -107,14 +107,13 @@ fn main() {
             })
             .unary_frontier::<(u64, u64), _, _, _>(Exchange::new(|&(k, _)| k),
                                 "word_count",
-                                |_cap, _| {
+                                |_cap| {
                 let mut notificator = FrontierNotificator::new();
                 let mut counts = HashMap::new();
                 let mut stash: HashMap<Capability<_>, Vec<Vec<(u64, u64)>>> = HashMap::new();
 
                 move |input, output| {
                     input.for_each(|time, data| {
-                        let time = time.retain();
                         stash.entry(time.clone()).or_insert_with(Vec::new).push(data.replace_with(Vec::new()));
                         notificator.notify_at(time);
                     });
