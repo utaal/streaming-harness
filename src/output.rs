@@ -13,6 +13,7 @@ impl Metrics<u64> for ::hdrhist::HDRHist {
     }
 }
 
+#[derive(Debug)]
 pub struct MetricCollector<
     T: Eq+Ord+Copy+Zero+Bounded,
     I: InputTimeResumableIterator<T>,
@@ -93,7 +94,10 @@ impl<
             if let Some(&input_t) = self.input_times.peek() {
                 if ack(input_t) {
                     self.input_times.next().unwrap();
-                    self.latency_metrics.record(input_t, at);
+                    if at >= self.warmup_end && at < self.experiment_end {
+                        self.latency_metrics.record(input_t, at);
+                        self.recorded_samples += 1;
+                    }
                     continue;
                 }
             }

@@ -35,7 +35,7 @@ fn main() {
     // Number of distinct keys.
     let keys: usize = args.next().unwrap().parse().unwrap();
 
-    let metrics = timely::execute_from_args(args, move |worker| {
+    let (metrics, timelines): (Vec<_>, Vec<_>) = timely::execute_from_args(args, move |worker| {
 
         let index = worker.index();
         let peers = worker.peers();
@@ -46,7 +46,9 @@ fn main() {
             let input_times = || streaming_harness::input::ConstantThroughputInputTimes::<u64, u64>::new(
                     1, 1_000_000_000 / throughput, seconds * 1_000_000_000);
             let output_metric_collector = Rc::new(RefCell::new(streaming_harness::output::MetricCollector::new(
-                input_times(), hdrhist::HDRHist::new()).with_warmup(2).with_cooldown(8))); 
+                input_times(),
+                streaming_harness::timeline::Timeline::new(2_000_000_000, 8_000_000_000, 1_000_000_000, hdrhist::HDRHist::new())
+                ).with_warmup(2_000_000_000).with_cooldown(8_000_000_000))); 
             let output_metric_collector_for_source = output_metric_collector.clone();
 
 
@@ -133,9 +135,18 @@ fn main() {
             Ok(out) => out.into_inner().into_inner(),
             Err(_) => panic!("dataflow is still running"),
         }
-    }).expect("unsuccessful execution").join().into_iter().fold(
-        hdrhist::HDRHist::new(), |acc, res| acc.combined(res.unwrap()));
+    }).expect("unsuccessful execution").join().into_iter().map(|x| x.unwrap().into_inner()).unzip();
+
+    let metrics = metrics.into_iter().fold(hdrhist::HDRHist::new(), |acc, hist| acc.combined(hist));
+    let timelines = (0..timelines[0].len()).map(|i| {
+        let mut combined = timelines[0][0].clone();
+        for timeline in &timelines[1..] {
+            combined = combined.combined(timeline[i].clone());
+        }
+        combined
+    }).collect::<Vec<_>>();
 
     eprintln!("== summary ==\n{}", metrics.summary_string());
+    eprintln!("== timeline ==\n{:#?}", timelines);
 }
 

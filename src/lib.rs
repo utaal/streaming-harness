@@ -9,6 +9,8 @@ extern crate timely;
 pub mod input;
 pub mod output;
 pub mod util;
+pub mod timeline;
 
 #[cfg(feature = "timely")]
 pub mod timely_support;
+
