@@ -21,13 +21,7 @@ use timely::progress::timestamp::RootTimestamp;
 
 use streaming_harness::util::ToNanos;
 use streaming_harness::input::InputTimeResumableIterator;
-
-enum SourceMode {
-    Load,
-    Wait,
-    Run,
-    Done,
-}
+use streaming_harness::timely_support::flow_controlled;
 
 fn main() {
     let mut args = std::env::args();
@@ -48,7 +42,7 @@ fn main() {
 
         let (output_metric_collector,) = worker.dataflow(|scope| {
             let data_loaded = Rc::new(RefCell::new(None));
-            let probe_handle = Rc::new(RefCell::new(ProbeHandle::new()));
+            let mut probe_handle = ProbeHandle::new();
 
             let input_times = || streaming_harness::input::ConstantThroughputInputTimes::<u64, u64>::new(
                     1, 1_000_000_000 / throughput, seconds * 1_000_000_000);
@@ -56,56 +50,39 @@ fn main() {
                 input_times(), hdrhist::HDRHist::new()).with_warmup(2).with_cooldown(8))); 
             let output_metric_collector_for_sink = output_metric_collector.clone();
 
-            source(scope, "WordsSource", |cap| {
-                let mut cap = Some(cap);
-                let mut mode = SourceMode::Load;
+
+            { 
+                let mut loading = true;
+
                 let data_loaded = data_loaded.clone();
-                let probe_handle = probe_handle.clone();
+                let mut probe_handle = probe_handle.clone();
 
                 let seed: &[_] = &[1, 2, 3, index];
                 let mut rng: StdRng = SeedableRng::from_seed(seed);
 
                 let mut input_times = streaming_harness::input::SyntheticInputTimeGenerator::new(input_times());
 
-                let (mut wait_ns, mut last_ns) = (RootTimestamp::new(0), RootTimestamp::new(0));
-                move |output| {
-                    match mode {
-                        SourceMode::Load => {
-                            for i in 0 .. keys / peers {
-                                output.session(&cap.as_ref().unwrap()).give(((i * peers + index) as u64, 1));
-                            }
-                            cap = cap.as_ref().map(|c| c.delayed(&RootTimestamp::new(1)));
-                            mode = SourceMode::Wait;
-                        },
-                        SourceMode::Wait => {
-                            if !probe_handle.borrow().less_than(cap.as_ref().unwrap().time()) {
-                                mode = SourceMode::Run;
-                                let start = ::std::time::Instant::now();
-                                *data_loaded.borrow_mut() = Some(start);
-                            }
-                        },
-                        SourceMode::Run => {
-                            if !probe_handle.borrow().less_than(&wait_ns) {
-                                wait_ns = last_ns;
-                                let target_ns = (data_loaded.borrow().as_ref().unwrap().elapsed().to_nanos() + 1)
-                                    / 1_000 * 1_000;
-                                last_ns = RootTimestamp::new(target_ns);
-
-                                if let Some(it) = input_times.iter_until_incl(target_ns) {
-                                    output.session(&cap.as_ref().unwrap()).give_iterator(
-                                        it.map(|ns| (ns, rng.next_u64())));
-                                    cap = cap.as_ref().map(|c| c.delayed(&RootTimestamp::new(target_ns)));
-                                } else {
-                                    cap = None;
-                                    mode = SourceMode::Done;
-                                }
-                            }
-                        },
-                        SourceMode::Done => ()
+                flow_controlled::iterator_source(scope, "WordsSource", move |last_ts| {
+                    if loading {
+                        loading = false;
+                        Some((RootTimestamp::new(1),
+                            (0 .. keys / peers)
+                                .map(|i| (RootTimestamp::new(0), ((i * peers + index) as u64, 1)))
+                                .collect::<Vec<_>>(), RootTimestamp::new(1)))
+                    } else {
+                        let mut data_loaded = data_loaded.borrow_mut();
+                        if data_loaded.is_none() {
+                            *data_loaded = Some(::std::time::Instant::now());
+                        }
+                        let target_ns = (data_loaded.as_ref().unwrap().elapsed().to_nanos() + 1)
+                            / 1_000 * 1_000;
+                        input_times.iter_until_incl(target_ns).map(|it|
+                            (RootTimestamp::new(target_ns),
+                             it.map(|ns| (*last_ts, (ns, rng.next_u64()))).collect::<Vec<_>>(),
+                             *last_ts))
                     }
-                }
-            })
-            .unary_frontier::<(u64, u64), _, _, _>(Exchange::new(|&(k, _)| k),
+                }, probe_handle)
+            }.unary_frontier::<(u64, u64), _, _, _>(Exchange::new(|&(k, _)| k),
                                 "word_count",
                                 |_cap| {
                 let mut notificator = FrontierNotificator::new();
@@ -138,7 +115,7 @@ fn main() {
                     });
                 }
             })
-            .probe_with(&mut probe_handle.borrow_mut())
+            .probe_with(&mut probe_handle)
             .sink(Pipeline, "example", move |input| {
                 while let Some((time, data)) = input.next() { } 
 

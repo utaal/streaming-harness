@@ -6,15 +6,16 @@ authors = ["Andrea Lattuada <andrea.lattuada@inf.ethz.ch>"]
 [features]
 default = []
 hdrhist-support = ["streaming-harness-hdrhist"]
+timely-support = ["timely"]
 
 [dependencies]
 num-traits = "^0.2"
+timely = { version = "^0.5", optional = true }
 streaming-harness-hdrhist = { version = "^0.2", optional = true }
 
 [dev-dependencies]
-timely = "^0.5"
 rand = "^0.3.18"
 
 [[example]]
 name = "timely-word-count"
-required-features = ["hdrhist-support"]
+required-features = ["hdrhist-support", "timely-support"]
