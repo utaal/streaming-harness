@@ -11,7 +11,7 @@ use rand::{SeedableRng, StdRng, Rng};
 // use abomonation::Abomonation;
 
 use timely::dataflow::*;
-use timely::dataflow::operators::{Capability, Input, Map, Probe, Operator, FrontierNotificator};
+use timely::dataflow::operators::{Capability, Input, Inspect, Map, Probe, Operator, FrontierNotificator};
 use timely::dataflow::channels::pact::{Exchange, Pipeline};
 
 use timely::dataflow::operators::input::Handle;
@@ -41,21 +41,21 @@ fn main() {
         let peers = worker.peers();
 
         let (output_metric_collector,) = worker.dataflow(|scope| {
-            let data_loaded = Rc::new(RefCell::new(None));
             let mut probe_handle = ProbeHandle::new();
 
             let input_times = || streaming_harness::input::ConstantThroughputInputTimes::<u64, u64>::new(
                     1, 1_000_000_000 / throughput, seconds * 1_000_000_000);
             let output_metric_collector = Rc::new(RefCell::new(streaming_harness::output::MetricCollector::new(
                 input_times(), hdrhist::HDRHist::new()).with_warmup(2).with_cooldown(8))); 
-            let output_metric_collector_for_sink = output_metric_collector.clone();
+            let output_metric_collector_for_source = output_metric_collector.clone();
 
 
             { 
                 let mut loading = true;
 
-                let data_loaded = data_loaded.clone();
+                let mut data_loaded = None;
                 let mut probe_handle = probe_handle.clone();
+                let probe_handle_for_source = probe_handle.clone();
 
                 let seed: &[_] = &[1, 2, 3, index];
                 let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -65,21 +65,28 @@ fn main() {
                 flow_controlled::iterator_source(scope, "WordsSource", move |last_ts| {
                     if loading {
                         loading = false;
-                        Some((RootTimestamp::new(1),
-                            (0 .. keys / peers)
-                                .map(|i| (RootTimestamp::new(0), ((i * peers + index) as u64, 1)))
-                                .collect::<Vec<_>>(), RootTimestamp::new(1)))
+                        Some(flow_controlled::IteratorSourceInput {
+                            lower_bound: RootTimestamp::new(1),
+                            data: vec![
+                                (RootTimestamp::new(0), (0 .. keys / peers).map(|i| ((i * peers + index) as u64, 1)).collect::<Vec<_>>())
+                            ],
+                            target: RootTimestamp::new(1),
+                        })
                     } else {
-                        let mut data_loaded = data_loaded.borrow_mut();
                         if data_loaded.is_none() {
-                            *data_loaded = Some(::std::time::Instant::now());
+                            data_loaded = Some(::std::time::Instant::now());
                         }
-                        let target_ns = (data_loaded.as_ref().unwrap().elapsed().to_nanos() + 1)
-                            / 1_000 * 1_000;
+                        let elapsed = data_loaded.as_ref().map(|t| t.elapsed()).unwrap();
+                        output_metric_collector_for_source.borrow_mut().acknowledge_while(
+                            elapsed.to_nanos(),
+                            |t| !probe_handle_for_source.less_than(&RootTimestamp::new(t)));
+                        let target_ns = (elapsed.to_nanos() + 1) / 1_000_000 * 1_000_000;
                         input_times.iter_until_incl(target_ns).map(|it|
-                            (RootTimestamp::new(target_ns),
-                             it.map(|ns| (*last_ts, (ns, rng.next_u64()))).collect::<Vec<_>>(),
-                             *last_ts))
+                            flow_controlled::IteratorSourceInput {
+                                lower_bound: RootTimestamp::new(target_ns),
+                                data: vec![(*last_ts, it.map(|ns| (ns, rng.next_u64())).collect::<Vec<_>>())],
+                                target: *last_ts,
+                            })
                     }
                 }, probe_handle)
             }.unary_frontier::<(u64, u64), _, _, _>(Exchange::new(|&(k, _)| k),
@@ -115,16 +122,7 @@ fn main() {
                     });
                 }
             })
-            .probe_with(&mut probe_handle)
-            .sink(Pipeline, "example", move |input| {
-                while let Some((time, data)) = input.next() { } 
-
-                if let Some(elapsed) = data_loaded.borrow().as_ref().map(|t| t.elapsed()) {
-                    output_metric_collector_for_sink.borrow_mut().acknowledge_while(
-                        elapsed.to_nanos(),
-                        |t| !input.frontier().less_than(&RootTimestamp::new(t)));
-                }
-            });
+            .probe_with(&mut probe_handle);
 
             (output_metric_collector,)
         });

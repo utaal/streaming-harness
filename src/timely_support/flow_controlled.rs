@@ -6,16 +6,28 @@ use timely::dataflow::operators::generic::operator::source;
 use timely::dataflow::operators::probe::Handle;
 use timely::dataflow::{Stream, Scope};
 
+/// Output of the input reading function for iterator_source.
+pub struct IteratorSourceInput<T: Clone, D: Data, DI: IntoIterator<Item=D>, I: IntoIterator<Item=(T, DI)>> {
+    /// Lower bound on timestamps that can be emitted by this input in the future.
+    pub lower_bound: T,
+    /// Any `T: IntoIterator` of new input data in the form (time, data): time must be
+    /// monotonically increasing.
+    pub data: I,
+    /// A timestamp that represents the frontier that the probe should have
+    /// reached before the function is invoked again to ingest additional input.
+    pub target: T,
+}
+
 /// Construct a source that repeatedly calls the provided function to ingest input.
 /// - The function can return None to signal the end of the input;
-/// - otherwise, it should return Some((t, data, target_t)), where:
-///   * `t` is a lower bound on timestamps that can be emitted by this input in the future,
+/// - otherwise, it should return a `IteratorSourceInput`, where:
+///   * `lower_bound` is a lower bound on timestamps that can be emitted by this input in the future,
 ///   `Default::default()` can be used if this isn't needed (the source will assume that
 ///   the timestamps in `data` are monotonically increasing and will release capabilities
 ///   accordingly);
-///   * `data` is any `T: IntoIterator` of (time, datum) to new input data: time must be
+///   * `data` is any `T: IntoIterator` of new input data in the form (time, data): time must be
 ///   monotonically increasing;
-///   * `target_t` is a timestamp that represents the frontier that the probe should have
+///   * `target` is a timestamp that represents the frontier that the probe should have
 ///   reached before the function is invoked again to ingest additional input.
 /// The function will receive the current lower bound of timestamps that can be inserted,
 /// `lower_bound`.
@@ -24,7 +36,7 @@ use timely::dataflow::{Stream, Scope};
 /// ```rust
 /// extern crate timely;
 /// 
-/// use timely::dataflow::operators::flow_controlled::iterator_source;
+/// use timely::dataflow::operators::flow_controlled::{iterator_source, IteratorSourceInput};
 /// use timely::dataflow::operators::{probe, Probe, Inspect};
 /// 
 /// use timely::progress::timestamp::RootTimestamp;
@@ -41,11 +53,15 @@ use timely::dataflow::{Stream, Scope};
 ///                 scope,
 ///                 "Source",
 ///                 move |prev_t| {
-///                     if input.peek().is_some() {
-///                         Some((Default::default(), input.by_ref().take(10).map(|x| {
-///                             next_t = x / 100 * 100;
-///                             (RootTimestamp::new(next_t), x)
-///                         }).collect::<Vec<_>>(), *prev_t))
+///                     if let Some(first_x) = input.peek().cloned() {
+///                         next_t = first_x / 100 * 100;
+///                         Some(IteratorSourceInput {
+///                             lower_bound: Default::default(),
+///                             data: vec![
+///                                 (RootTimestamp::new(next_t),
+///                                  input.by_ref().take(10).map(|x| (/* "timestamp" */ x, x)).collect::<Vec<_>>())],
+///                             target: *prev_t,
+///                         })
 ///                     } else {
 ///                         None
 ///                     }
@@ -60,40 +76,46 @@ use timely::dataflow::{Stream, Scope};
 pub fn iterator_source<
     G: Scope,
     D: Data,
-    I: IntoIterator<Item=(G::Timestamp, D)>,
-    F: FnMut(&G::Timestamp)->Option<(G::Timestamp, I, G::Timestamp)>+'static>(
+    DI: IntoIterator<Item=D>,
+    I: IntoIterator<Item=(G::Timestamp, DI)>,
+    F: FnMut(&G::Timestamp)->Option<IteratorSourceInput<G::Timestamp, D, DI, I>>+'static>(
         scope: &G,
         name: &str,
         mut input_f: F,
         probe: Handle<G::Timestamp>,
         ) -> Stream<G, D> where G::Timestamp: TotalOrder {
 
-    let mut target_t = Default::default();
+    let mut target = Default::default();
     source(scope, name, |cap| {
         let mut cap = Some(cap);
         move |output| {
             cap = cap.take().and_then(|mut cap| {
-                if !probe.less_than(&target_t) {
-                    loop {
-                        if let Some((done_until_t, data, new_target_t)) = input_f(cap.time()) {
-                            target_t = new_target_t;
+                loop {
+                    if !probe.less_than(&target) {
+                        if let Some(IteratorSourceInput {
+                             lower_bound,
+                             data,
+                             target: new_target,
+                         }) = input_f(cap.time()) {
+                            target = new_target;
                             let mut has_data = false;
-                            for (t, d) in data.into_iter() {
+                            for (t, ds) in data.into_iter() {
                                 cap = if cap.time() != &t { cap.delayed(&t) } else { cap };
-                                output.session(&cap).give(d);
+                                let mut session = output.session(&cap);
+                                session.give_iterator(ds.into_iter());
                                 has_data = true;
                             }
 
-                            cap = if cap.time().less_than(&done_until_t) { cap.delayed(&done_until_t) } else { cap };
+                            cap = if cap.time().less_than(&lower_bound) { cap.delayed(&lower_bound) } else { cap };
                             if !has_data {
                                 break Some(cap);
                             }
                         } else {
                             break None;
                         }
+                    } else {
+                        break Some(cap);
                     }
-                } else {
-                    Some(cap)
                 }
             });
         }
