@@ -4,12 +4,18 @@ use num_traits::{Zero, Bounded};
 pub trait Metrics<T: Eq+Ord+Copy> {
     #[inline(always)]
     fn record(&mut self, begin_t: T, end_t: T);
+
+    fn combined(self, other: Self) -> Self;
 }
 
 #[cfg(feature = "hdrhist-support")]
 impl Metrics<u64> for ::hdrhist::HDRHist {
     fn record(&mut self, begin_t: u64, end_t: u64) {
         self.add_value(end_t - begin_t);
+    }
+
+    fn combined(self, other: Self) -> Self {
+        self.combined(other)
     }
 }
 
@@ -65,7 +71,7 @@ impl<
     #[inline(always)]
     pub fn acknowledge_next(&mut self, at: T) {
         let begin_t = self.input_times.next().expect("No additional input_times");
-        if at >= self.warmup_end && at < self.experiment_end {
+        if begin_t >= self.warmup_end && begin_t < self.experiment_end {
             self.latency_metrics.record(begin_t, at);
             self.recorded_samples += 1;
         }
@@ -77,7 +83,7 @@ impl<
             if let Some(&input_t) = self.input_times.peek() {
                 if input_t <= till_input_t {
                     self.input_times.next().unwrap();
-                    if at >= self.warmup_end && at < self.experiment_end {
+                    if input_t >= self.warmup_end && input_t < self.experiment_end {
                         self.latency_metrics.record(input_t, at);
                         self.recorded_samples += 1;
                     }
@@ -94,7 +100,7 @@ impl<
             if let Some(&input_t) = self.input_times.peek() {
                 if ack(input_t) {
                     self.input_times.next().unwrap();
-                    if at >= self.warmup_end && at < self.experiment_end {
+                    if input_t >= self.warmup_end && input_t < self.experiment_end {
                         self.latency_metrics.record(input_t, at);
                         self.recorded_samples += 1;
                     }

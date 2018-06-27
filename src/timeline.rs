@@ -3,18 +3,16 @@ use std::ops::{Add, Sub};
 use num_traits::{Zero, Bounded};
 
 #[derive(Debug, Clone)]
-pub struct TimelineElement<T: Eq+Ord+Copy+Zero+Bounded> {
-    time: T,
-    min: T,
-    max: T,
-    samples: usize,
+pub struct TimelineElement<T: Eq+Ord+Copy+Zero+Bounded, M: Metrics<T>> {
+    pub time: T,
+    pub metrics: M,
+    pub samples: usize,
 }
 
-impl<T: Eq+Ord+Copy+Zero+Bounded> TimelineElement<T> {
+impl<T: Eq+Ord+Copy+Zero+Bounded, M: Metrics<T>> TimelineElement<T, M> {
     pub fn combined(mut self, other: Self) -> Self {
         assert!(self.time == other.time, "self.time != other.time");
-        self.min = ::std::cmp::min(self.min, other.min);
-        self.max = ::std::cmp::max(self.max, other.max);
+        self.metrics = self.metrics.combined(other.metrics);
         self.samples = self.samples + other.samples;
         self
     }
@@ -23,21 +21,23 @@ impl<T: Eq+Ord+Copy+Zero+Bounded> TimelineElement<T> {
 pub struct Timeline<
     T: Eq+Ord+Copy+Zero+Bounded+Add<DT, Output=T>+Sub<T, Output=T>,
     DT: Copy,
-    M: Metrics<T>> {
+    M: Metrics<T>,
+    TM: Metrics<T>> {
 
-    latency_metrics: M,
+    pub latency_metrics: M,
     timeline_dt: DT,
     cur_element: usize,
     cur_element_t: T,
-    timeline: Vec<TimelineElement<T>>,
+    pub timeline: Vec<TimelineElement<T, TM>>,
 }
 
 impl<
     T: Eq+Ord+Copy+Zero+Bounded+Add<DT, Output=T>+Sub<T, Output=T>,
     DT: Copy,
-    M: Metrics<T>> Timeline<T, DT, M> {
+    M: Metrics<T>,
+    TM: Metrics<T>> Timeline<T, DT, M, TM> {
 
-    pub fn new(start_t: T, end_t: T, timeline_dt: DT, latency_metrics: M) -> Self {
+    pub fn new(start_t: T, end_t: T, timeline_dt: DT, latency_metrics: M, timeline_metrics: impl Fn()->TM) -> Self {
         Self {
             latency_metrics,
             timeline_dt,
@@ -49,44 +49,57 @@ impl<
                 Some(cur)
             }).take_while(|t| *t < end_t).map(|time| TimelineElement {
                 time,
-                min: T::max_value(),
-                max: T::min_value(),
+                metrics: timeline_metrics(),
                 samples: 0,
             }).collect(),
         }
-    }
-
-    pub fn into_inner(self) -> (M, Box<[TimelineElement<T>]>) {
-        let Timeline {
-            latency_metrics,
-            timeline,
-            ..
-        } = self;
-        (latency_metrics, timeline.into_boxed_slice())
     }
 }
 
 impl<
     T: Eq+Ord+Copy+Zero+Bounded+Add<DT, Output=T>+Sub<T, Output=T>,
-    DT: Copy,
-    M: Metrics<T>> Metrics<T> for Timeline<T, DT, M> {
+    DT: Copy+Eq+::std::fmt::Debug,
+    M: Metrics<T>,
+    TM: Metrics<T>> Metrics<T> for Timeline<T, DT, M, TM> {
 
     #[inline(always)]
     fn record(&mut self, begin_t: T, end_t: T) {
         self.latency_metrics.record(begin_t, end_t);
-        while end_t > self.cur_element_t + self.timeline_dt {
+        while begin_t >= self.cur_element_t + self.timeline_dt {
             self.cur_element_t = self.cur_element_t + self.timeline_dt;
             self.cur_element += 1;
         }
         let TimelineElement {
-            ref mut min,
-            ref mut max,
+            ref mut metrics,
             ref mut samples,
             ..
         } = &mut self.timeline[self.cur_element];
-        let latency = end_t - begin_t;
-        *min = ::std::cmp::min(*min, latency);
-        *max = ::std::cmp::max(*max, latency);
+        metrics.record(begin_t, end_t);
         *samples += 1;
+    }
+
+    fn combined(self, other: Self) -> Self {
+        let Timeline {
+            timeline,
+            latency_metrics,
+            timeline_dt,
+            cur_element,
+            cur_element_t,
+        } = self;
+        let Timeline {
+            timeline: other_timeline,
+            latency_metrics: other_latency_metrics,
+            timeline_dt: other_timeline_dt,
+            ..
+        } = other;
+        assert_eq!(timeline_dt, other_timeline_dt);
+        Timeline {
+            timeline: 
+                timeline.into_iter().zip(other_timeline.into_iter()).map(|(s, m)| s.combined(m)).collect(),
+            latency_metrics: latency_metrics.combined(other_latency_metrics),
+            timeline_dt,
+            cur_element,
+            cur_element_t,
+        }
     }
 }
