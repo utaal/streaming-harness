@@ -11,6 +11,6 @@ pub mod output;
 pub mod util;
 pub mod timeline;
 
-#[cfg(feature = "timely")]
+#[cfg(feature = "timely-support")]
 pub mod timely_support;
 

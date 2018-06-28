@@ -4,7 +4,7 @@ extern crate streaming_harness_hdrhist as hdrhist;
 extern crate rand;
 
 use std::collections::HashMap;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use rand::{SeedableRng, StdRng, Rng};
@@ -24,6 +24,7 @@ use streaming_harness::input::InputTimeResumableIterator;
 use streaming_harness::timely_support::flow_controlled;
 use streaming_harness::output::Metrics;
 use streaming_harness::timeline::Timeline;
+use streaming_harness::timely_support::Acknowledge;
 
 fn main() {
     let mut args = std::env::args();
@@ -49,11 +50,14 @@ fn main() {
                     1, 1_000_000_000 / throughput, seconds * 1_000_000_000);
             let output_metric_collector = Rc::new(RefCell::new(streaming_harness::output::MetricCollector::new(
                 input_times(),
-                streaming_harness::timeline::Timeline::new(0_000_000_000, 10_000_000_000, 100_000_000, hdrhist::HDRHist::new(), || hdrhist::HDRHist::new())
+                streaming_harness::timeline::Timeline::new(
+                    0_000_000_000, 10_000_000_000, 100_000_000,
+                    hdrhist::HDRHist::new(),
+                    || hdrhist::HDRHist::new())
                 ).with_warmup(0_000_000_000).with_cooldown(10_000_000_000))); 
             let output_metric_collector_for_acknowledge = output_metric_collector.clone();
 
-            let mut data_loaded = ::std::sync::Arc::new(::std::cell::Cell::new(None));
+            let mut data_loaded = ::std::rc::Rc::new(Cell::new(None));
             { 
                 let mut loading = true;
                 let data_loaded = data_loaded.clone();
@@ -123,18 +127,9 @@ fn main() {
                     });
                 }
             })
-            .unary_frontier(Pipeline, "Acknowledge", move |_cap| {
-                move |input, output| {
-                    while let Some((time, data)) = input.next() {
-                        output.session(&time).give_content(data);
-                    }
-                    if let Some(elapsed) = data_loaded.get().as_ref().map(|t| t.elapsed()) {
-                        output_metric_collector_for_acknowledge.borrow_mut().acknowledge_while(
-                            elapsed.to_nanos(),
-                            |t| !input.frontier().less_than(&RootTimestamp::new(t)));
-                    }
-                }
-            })
+            .acknowledge(
+                output_metric_collector_for_acknowledge,
+                data_loaded)
             .probe_with(&mut probe_handle);
 
             (output_metric_collector,)
