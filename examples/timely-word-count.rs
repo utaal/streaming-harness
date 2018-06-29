@@ -77,7 +77,7 @@ fn main() {
                         }
                         let elapsed = data_loaded.get().as_ref().map(|t| t.elapsed()).unwrap();
                         let target_ns = (elapsed.to_nanos() + 1) / 1_000_000 * 1_000_000;
-                        input_times.iter_until_incl(target_ns).map(|it|
+                        input_times.iter_until(target_ns).map(|it|
                             flow_controlled::IteratorSourceInput {
                                 lower_bound: RootTimestamp::new(target_ns),
                                 data: vec![(*last_ts, it.map(|ns| (ns, rng.next_u64())).collect::<Vec<_>>())],

@@ -66,13 +66,13 @@ impl<T: Copy+Eq+Ord, I: InputTimeResumableIterator<T>> SyntheticInputTimeGenerat
         }
     }
 
-    pub fn iter_until_incl<'a>(&'a mut self, until_incl: T) -> Option<impl Iterator<Item=T>+'a> {
+    pub fn iter_until<'a>(&'a mut self, until: T) -> Option<impl Iterator<Item=T>+'a> {
         if self.input_times.end() {
             None
         } else {
             Some(SyntheticInputTimeGeneratorIterator {
                 referenced: self,
-                until_incl: until_incl,
+                until,
             })
         }
     }
@@ -80,7 +80,7 @@ impl<T: Copy+Eq+Ord, I: InputTimeResumableIterator<T>> SyntheticInputTimeGenerat
 
 struct SyntheticInputTimeGeneratorIterator<'a, T: Copy+Eq+Ord+'a, I: InputTimeResumableIterator<T>+'a> {
     referenced: &'a mut SyntheticInputTimeGenerator<T, I>,
-    until_incl: T,
+    until: T,
 }
 
 impl<'a, T: Copy+Eq+Ord+'a, I: InputTimeResumableIterator<T>+'a> Iterator for SyntheticInputTimeGeneratorIterator<'a, T, I> {
@@ -90,7 +90,7 @@ impl<'a, T: Copy+Eq+Ord+'a, I: InputTimeResumableIterator<T>+'a> Iterator for Sy
         if self.referenced.input_times.end() {
             None
         } else if let Some(&next_t) = self.referenced.input_times.peek() {
-            if next_t <= self.until_incl {
+            if next_t < self.until {
                 self.referenced.input_times.next().unwrap();
                 Some(next_t)
             } else {

@@ -158,7 +158,7 @@ pub mod default {
         overall_start: u64,
         overall_end: u64,
         total_duration: u64,
-        timeline_inerval: u64) ->
+        timeline_interval: u64) ->
         super::MetricCollector<
             u64,
             I,
@@ -167,7 +167,7 @@ pub mod default {
         super::MetricCollector::new(
             input_times,
             ::timeline::Timeline::new(
-                start, total_duration, timeline_inerval,
+                start, total_duration, timeline_interval,
                 super::WarmupDurationMetrics::new(::hdrhist::HDRHist::new(), overall_start, overall_end),
                 || ::hdrhist::HDRHist::new()))
     }
