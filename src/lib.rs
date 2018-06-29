@@ -10,6 +10,7 @@ pub mod input;
 pub mod output;
 pub mod util;
 pub mod timeline;
+pub mod format;
 
 #[cfg(feature = "timely-support")]
 pub mod timely_support;

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use rand::{SeedableRng, StdRng, Rng};
+use rand::RngCore;
 
 use timely::dataflow::*;
 use timely::dataflow::operators::{Capability, Probe, Operator, FrontierNotificator};
@@ -56,8 +56,8 @@ fn main() {
 
                 let probe_handle = probe_handle.clone();
 
-                let seed: &[_] = &[1, 2, 3, index];
-                let mut rng: StdRng = SeedableRng::from_seed(seed);
+                let seed: [u8; 16] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, index as u8];
+                let mut rng: ::rand::rngs::SmallRng = ::rand::SeedableRng::from_seed(seed);
 
                 let mut input_times = streaming_harness::input::SyntheticInputTimeGenerator::new(input_times());
 
@@ -138,19 +138,5 @@ fn main() {
     eprintln!("== timeline ==\n{}",
               timeline.clone().into_iter().map(|::streaming_harness::timeline::TimelineElement { time, metrics, samples }|
                     format!("-- {} ({} samples) --\n{}", time, samples, metrics.summary_string())).collect::<Vec<_>>().join("\n"));
-    // println!("{}",
-    //          timeline.clone().into_iter().map(|::streaming_harness::timeline::TimelineElement { time, metrics, .. }|
-    //                 metrics
-    //                 .ccdf()
-    //                 .map(|(value, prob, count)| format!("timeline_ccdf {}\t{}\t{}\t{}", time, value, prob, count))
-    //                 .collect::<Vec<_>>()
-    //                 .join("\n")).collect::<Vec<_>>().join("\n"));
-    // println!("{}",
-    //          timeline.into_iter().map(|::streaming_harness::timeline::TimelineElement { time, metrics, .. }|
-    //                 format!("timeline_percentiles {}\t{}", time, metrics
-    //                 .summary()
-    //                 .map(|(_, count)| format!("{}", count))
-    //                 .collect::<Vec<_>>()
-    //                 .join("\t"))).collect::<Vec<_>>().join("\n"));
+    println!("{}", ::streaming_harness::format::format_summary_timeline("summary_timeline".to_string(), timeline.clone()));
 }
-

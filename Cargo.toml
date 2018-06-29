@@ -14,7 +14,7 @@ timely = { version = "^0.6", optional = true }
 streaming-harness-hdrhist = { version = "^0.2", optional = true }
 
 [dev-dependencies]
-rand = "^0.3.18"
+rand = "^0.5"
 
 [[example]]
 name = "timely-word-count"
