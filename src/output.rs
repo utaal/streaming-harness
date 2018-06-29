@@ -27,8 +27,6 @@ pub struct MetricCollector<
 
     input_times: I,
     latency_metrics: M,
-    warmup_end: T,
-    experiment_end: T,
     recorded_samples: usize,
     _phantom: ::std::marker::PhantomData<T>,
 }
@@ -42,21 +40,9 @@ impl<
         Self {
             input_times,
             latency_metrics,
-            warmup_end: T::zero(),
-            experiment_end: T::max_value(),
             recorded_samples: 0usize,
             _phantom: ::std::marker::PhantomData,
         }
-    }
-
-    pub fn with_warmup(mut self, warmup_end: T) -> Self {
-        self.warmup_end = warmup_end;
-        self
-    }
-
-    pub fn with_cooldown(mut self, experiment_end: T) -> Self {
-        self.experiment_end = experiment_end;
-        self
     }
 
     pub fn into_inner(self) -> M {
@@ -71,10 +57,8 @@ impl<
     #[inline(always)]
     pub fn acknowledge_next(&mut self, at: T) {
         let begin_t = self.input_times.next().expect("No additional input_times");
-        if begin_t >= self.warmup_end && begin_t < self.experiment_end {
-            self.latency_metrics.record(begin_t, at);
-            self.recorded_samples += 1;
-        }
+        self.latency_metrics.record(begin_t, at);
+        self.recorded_samples += 1;
     }
 
     #[inline(always)]
@@ -83,10 +67,8 @@ impl<
             if let Some(&input_t) = self.input_times.peek() {
                 if input_t <= till_input_t {
                     self.input_times.next().unwrap();
-                    if input_t >= self.warmup_end && input_t < self.experiment_end {
-                        self.latency_metrics.record(input_t, at);
-                        self.recorded_samples += 1;
-                    }
+                    self.latency_metrics.record(input_t, at);
+                    self.recorded_samples += 1;
                     continue;
                 }
             }
@@ -100,14 +82,70 @@ impl<
             if let Some(&input_t) = self.input_times.peek() {
                 if ack(input_t) {
                     self.input_times.next().unwrap();
-                    if input_t >= self.warmup_end && input_t < self.experiment_end {
-                        self.latency_metrics.record(input_t, at);
-                        self.recorded_samples += 1;
-                    }
+                    self.latency_metrics.record(input_t, at);
+                    self.recorded_samples += 1;
                     continue;
                 }
             }
             break;
         }
     }
+}
+
+pub struct WarmupDurationMetrics<T: Eq+Ord+Copy, M: Metrics<T>> {
+    metrics: M,
+    warmup_end: T,
+    experiment_end: T,
+}
+
+impl<T: Eq+Ord+Copy+::std::fmt::Debug, M: Metrics<T>> WarmupDurationMetrics<T, M> {
+    pub fn new(metrics: M, warmup_end: T, experiment_end: T) -> Self {
+        Self {
+            metrics,
+            warmup_end,
+            experiment_end,
+        }
+    }
+
+    pub fn into_inner(self) -> M {
+        let WarmupDurationMetrics {
+            metrics,
+            ..
+        } = self;
+        metrics
+    }
+}
+
+impl<T: Eq+Ord+Copy+::std::fmt::Debug, M: Metrics<T>> Metrics<T> for WarmupDurationMetrics<T, M> {
+    fn record(&mut self, begin_t: T, end_t: T) {
+        if begin_t >= self.warmup_end && begin_t < self.experiment_end {
+            self.metrics.record(begin_t, end_t);
+        }
+    }
+
+    fn combined(self, other: Self) -> Self {
+        let WarmupDurationMetrics {
+            metrics,
+            warmup_end,
+            experiment_end,
+        } = self;
+        let WarmupDurationMetrics {
+            metrics: other_metrics,
+            warmup_end: other_warmup_end,
+            experiment_end: other_experiment_end,
+        } = other;
+        assert_eq!(warmup_end, other_warmup_end);
+        assert_eq!(experiment_end, other_experiment_end);
+        WarmupDurationMetrics {
+            metrics: metrics.combined(other_metrics),
+            warmup_end,
+            experiment_end,
+        }
+    }
+}
+
+pub fn combine_all<T: Eq+Ord+Copy, M: Metrics<T>, A: IntoIterator<Item=M>>(all: A) -> M {
+    let mut it = all.into_iter();
+    let first = it.next().expect("expected at least one metric");
+    it.fold(first, |a, b| a.combined(b))
 }

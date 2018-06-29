@@ -8,21 +8,16 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use rand::{SeedableRng, StdRng, Rng};
-// use abomonation::Abomonation;
 
 use timely::dataflow::*;
-use timely::dataflow::operators::{Capability, Input, Inspect, Map, Probe, Operator, FrontierNotificator};
-use timely::dataflow::channels::pact::{Exchange, Pipeline};
+use timely::dataflow::operators::{Capability, Probe, Operator, FrontierNotificator};
+use timely::dataflow::operators::flow_controlled;
+use timely::dataflow::channels::pact::Exchange;
 
-use timely::dataflow::operators::input::Handle;
-use timely::dataflow::operators::generic::{FrontieredInputHandle, source};
-use timely::progress::nested::product::Product;
 use timely::progress::timestamp::RootTimestamp;
 
 use streaming_harness::util::ToNanos;
-use streaming_harness::input::InputTimeResumableIterator;
-use streaming_harness::timely_support::flow_controlled;
-use streaming_harness::output::Metrics;
+use streaming_harness::{output, output::WarmupDurationMetrics};
 use streaming_harness::timeline::Timeline;
 use streaming_harness::timely_support::Acknowledge;
 
@@ -52,18 +47,17 @@ fn main() {
                 input_times(),
                 streaming_harness::timeline::Timeline::new(
                     0_000_000_000, 10_000_000_000, 100_000_000,
-                    hdrhist::HDRHist::new(),
+                    WarmupDurationMetrics::new(hdrhist::HDRHist::new(), 2_000_000_000, 10_000_000_000),
                     || hdrhist::HDRHist::new())
-                ).with_warmup(0_000_000_000).with_cooldown(10_000_000_000))); 
+                )));
             let output_metric_collector_for_acknowledge = output_metric_collector.clone();
 
-            let mut data_loaded = ::std::rc::Rc::new(Cell::new(None));
+            let data_loaded = ::std::rc::Rc::new(Cell::new(None));
             { 
                 let mut loading = true;
                 let data_loaded = data_loaded.clone();
 
-                let mut probe_handle = probe_handle.clone();
-                let probe_handle_for_source = probe_handle.clone();
+                let probe_handle = probe_handle.clone();
 
                 let seed: &[_] = &[1, 2, 3, index];
                 let mut rng: StdRng = SeedableRng::from_seed(seed);
@@ -138,23 +132,12 @@ fn main() {
 
         while worker.step() { }
 
-        match Rc::try_unwrap(output_metric_collector) {
-            Ok(out) => out.into_inner().into_inner(),
-            Err(_) => panic!("dataflow is still running"),
-        }
+        Rc::try_unwrap(output_metric_collector).map_err(|_| ()).expect("dataflow still running").into_inner().into_inner()
     }).expect("unsuccessful execution").join().into_iter().map(|x| x.unwrap()).collect();
  
-    let Timeline {
-        timeline,
-        latency_metrics,
-        ..
-    } = {
-        let mut timelines_it = timelines.into_iter();
-        let timelines_first = timelines_it.next().unwrap();
-        timelines_it.fold(timelines_first, |a, b| a.combined(b))
-    };
+    let Timeline { timeline, latency_metrics, .. } = output::combine_all(timelines);
 
-    eprintln!("== summary ==\n{}", latency_metrics.summary_string());
+    eprintln!("== summary ==\n{}", latency_metrics.into_inner().summary_string());
     eprintln!("== timeline ==\n{}",
               timeline.clone().into_iter().map(|::streaming_harness::timeline::TimelineElement { time, metrics, samples }|
                     format!("-- {} ({} samples) --\n{}", time, samples, metrics.summary_string())).collect::<Vec<_>>().join("\n"));
