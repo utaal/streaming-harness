@@ -149,3 +149,26 @@ pub fn combine_all<T: Eq+Ord+Copy, M: Metrics<T>, A: IntoIterator<Item=M>>(all: 
     let first = it.next().expect("expected at least one metric");
     it.fold(first, |a, b| a.combined(b))
 }
+
+pub mod default {
+    #[cfg(feature = "hdrhist-support")]
+    pub fn hdrhist_timeline_collector<I: super::InputTimeResumableIterator<u64>>(
+        input_times: I,
+        start: u64,
+        overall_start: u64,
+        overall_end: u64,
+        total_duration: u64,
+        timeline_inerval: u64) ->
+        super::MetricCollector<
+            u64,
+            I,
+            ::timeline::Timeline<u64, u64, super::WarmupDurationMetrics<u64, ::hdrhist::HDRHist>, ::hdrhist::HDRHist>> {
+
+        super::MetricCollector::new(
+            input_times,
+            ::timeline::Timeline::new(
+                start, total_duration, timeline_inerval,
+                super::WarmupDurationMetrics::new(::hdrhist::HDRHist::new(), overall_start, overall_end),
+                || ::hdrhist::HDRHist::new()))
+    }
+}

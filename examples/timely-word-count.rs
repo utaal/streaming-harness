@@ -17,7 +17,7 @@ use timely::dataflow::channels::pact::Exchange;
 use timely::progress::timestamp::RootTimestamp;
 
 use streaming_harness::util::ToNanos;
-use streaming_harness::{output, output::WarmupDurationMetrics};
+use streaming_harness::output;
 use streaming_harness::timeline::Timeline;
 use streaming_harness::timely_support::Acknowledge;
 
@@ -43,13 +43,10 @@ fn main() {
 
             let input_times = || streaming_harness::input::ConstantThroughputInputTimes::<u64, u64>::new(
                     1, 1_000_000_000 / throughput, seconds * 1_000_000_000);
-            let output_metric_collector = Rc::new(RefCell::new(streaming_harness::output::MetricCollector::new(
-                input_times(),
-                streaming_harness::timeline::Timeline::new(
-                    0_000_000_000, 10_000_000_000, 100_000_000,
-                    WarmupDurationMetrics::new(hdrhist::HDRHist::new(), 2_000_000_000, 10_000_000_000),
-                    || hdrhist::HDRHist::new())
-                )));
+            let output_metric_collector = Rc::new(RefCell::new(
+                streaming_harness::output::default::hdrhist_timeline_collector(
+                    input_times(),
+                    0, 2_000_000_000, 8_000_000_000, 10_000_000_000, 1_000_000_000)));
             let output_metric_collector_for_acknowledge = output_metric_collector.clone();
 
             let data_loaded = ::std::rc::Rc::new(Cell::new(None));
