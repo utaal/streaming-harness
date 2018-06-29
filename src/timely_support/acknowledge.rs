@@ -27,7 +27,7 @@ impl<G: Scope<Timestamp=Product<RootTimestamp, u64>>, D: Data> Acknowledge<G, D>
             metric_collector: Rc<RefCell<MetricCollector<u64, I, M>>>,
             data_loaded: Rc<Cell<Option<::std::time::Instant>>>) -> Stream<G, D> {
 
-        self.unary_frontier(Pipeline, "Acknowledge", move |_cap| {
+        self.unary_frontier(Pipeline, "Acknowledge", move |_cap, _| {
             move |input, output| {
                 while let Some((time, data)) = input.next() {
                     output.session(&time).give_content(data);

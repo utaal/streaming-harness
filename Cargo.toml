@@ -10,7 +10,7 @@ timely-support = ["timely"]
 
 [dependencies]
 num-traits = "^0.2"
-timely = { version = "^0.5", optional = true }
+timely = { version = "^0.6", optional = true }
 streaming-harness-hdrhist = { version = "^0.2", optional = true }
 
 [dev-dependencies]
