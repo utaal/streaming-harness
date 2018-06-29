@@ -3,6 +3,9 @@ name = "streaming-harness"
 version = "0.1.0"
 authors = ["Andrea Lattuada <andrea.lattuada@inf.ethz.ch>"]
 
+description = "A benchmarking harness for streaming systems"
+license = "MIT"
+
 [features]
 default = []
 hdrhist-support = ["streaming-harness-hdrhist"]
