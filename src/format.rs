@@ -5,8 +5,8 @@ pub fn format_detailed_timeline(
     timeline: Vec<::timeline::TimelineElement<u64, ::hdrhist::HDRHist>>) -> String {
     timeline.into_iter().map(|::timeline::TimelineElement { time, metrics, .. }|
         metrics
-            .ccdf()
-            .map(|(value, prob, count)| format!("{}\t{}\t{}\t{}\t{}", prefix, time, value, prob, count))
+            .ccdf_upper_bound()
+            .map(|(value, prob)| format!("{}\t{}\t{}\t{}", prefix, time, value, prob))
             .collect::<Vec<_>>()
             .join("\n")).collect::<Vec<_>>().join("\n")
 }
@@ -18,7 +18,7 @@ pub fn format_summary_timeline(
     timeline.into_iter().map(|::timeline::TimelineElement { time, metrics, .. }|
         format!("{}\t{}\t{}", prefix, time, metrics
             .summary()
-            .map(|(_, count)| format!("{}", count))
+            .map(|(_, _, upper_bound)| format!("{}", upper_bound))
             .collect::<Vec<_>>()
             .join("\t"))).collect::<Vec<_>>().join("\n")
 }

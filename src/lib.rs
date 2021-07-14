@@ -1,7 +1,7 @@
 extern crate num_traits;
 
 #[cfg(feature = "hdrhist-support")]
-extern crate streaming_harness_hdrhist as hdrhist;
+extern crate hdrhist;
 
 #[cfg(feature = "timely")]
 extern crate timely;

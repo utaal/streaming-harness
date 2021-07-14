@@ -1,6 +1,6 @@
 extern crate timely;
 extern crate streaming_harness;
-extern crate streaming_harness_hdrhist as hdrhist;
+extern crate hdrhist;
 extern crate rand;
 
 use std::collections::HashMap;

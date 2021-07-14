@@ -1,6 +1,6 @@
 [package]
 name = "streaming-harness"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Andrea Lattuada <andrea.lattuada@inf.ethz.ch>"]
 
 description = "A benchmarking harness for streaming systems"
@@ -8,13 +8,13 @@ license = "MIT"
 
 [features]
 default = []
-hdrhist-support = ["streaming-harness-hdrhist"]
+hdrhist-support = ["hdrhist"]
 timely-support = ["timely"]
 
 [dependencies]
 num-traits = "^0.2"
 timely = { version = "^0.6", optional = true }
-streaming-harness-hdrhist = { version = "^0.2", optional = true }
+hdrhist = { version = "^0.5", optional = true }
 
 [dev-dependencies]
 rand = "^0.5"
